@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prompt Firewall Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #08111f;
+      --panel: rgba(10, 20, 38, 0.88);
+      --panel-border: rgba(103, 190, 255, 0.18);
+      --text: #ebf4ff;
+      --muted: #9ab3cc;
+      --accent: #27c1a5;
+      --accent-2: #4ea1ff;
+      --danger: #ff6f6f;
+      --warning: #ffc857;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(39, 193, 165, 0.22), transparent 35%),
+        radial-gradient(circle at top right, rgba(78, 161, 255, 0.22), transparent 30%),
+        linear-gradient(135deg, #040a14, var(--bg));
+      min-height: 100vh;
+    }
+    .container {
+      width: min(1200px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 24px 0 40px;
+    }
+    .hero, .panel {
+      border: 1px solid var(--panel-border);
+      border-radius: 18px;
+      background: rgba(8, 17, 31, 0.85);
+      backdrop-filter: blur(12px);
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+    }
+    .hero {
+      margin-bottom: 20px;
+      padding: 24px;
+    }
+    .hero h1 {
+      margin: 0 0 10px;
+      font-size: clamp(1.8rem, 5vw, 3rem);
+      letter-spacing: 0.04em;
+    }
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 720px;
+      line-height: 1.5;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+    .panel { padding: 18px; }
+    .panel h2 {
+      margin: 0 0 14px;
+      font-size: 1.1rem;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+    .stat {
+      padding: 14px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .stat strong {
+      display: block;
+      font-size: 1.6rem;
+      margin-bottom: 4px;
+    }
+    .stat span {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .tag {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+    }
+    .allow    { background: rgba(39, 193, 165, 0.18); color: #7cf0d6; }
+    .sanitize { background: rgba(255, 200, 87, 0.18);  color: #ffd870; }
+    .block    { background: rgba(255, 111, 111, 0.18); color: #ff9a9a; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 18px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 600;
+      transition: opacity 0.15s;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-danger  { background: rgba(255,111,111,0.2); color: #ff9a9a; border: 1px solid rgba(255,111,111,0.3); }
+    .btn-primary { background: rgba(78,161,255,0.2);  color: #a8d0ff; border: 1px solid rgba(78,161,255,0.3); }
+
+    .red-team-results { margin-top: 14px; }
+    .red-team-results pre {
+      background: rgba(0,0,0,0.3);
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      overflow-x: auto;
+      max-height: 260px;
+    }
+    .footer {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="hero">
+      <h1>AI Prompt Injection Firewall</h1>
+      <p>
+        Production-style telemetry view for prompt injection defense. Track attack classes,
+        enforcement decisions, recent events, and run manual red-team validation.
+      </p>
+    </section>
+
+    <section class="grid">
+
+      <!-- Charts -->
+      <div class="panel">
+        <h2>Attacks by Category</h2>
+        <canvas id="attackChart" height="220"></canvas>
+      </div>
+
+      <div class="panel">
+        <h2>Decision Distribution</h2>
+        <canvas id="decisionChart" height="220"></canvas>
+      </div>
+
+      <!-- Red-team panel — manual trigger only -->
+      <div class="panel" style="grid-column: 1 / -1;">
+        <h2>Red-Team Simulator</h2>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+          <div class="stats" style="flex:1; min-width:280px;">
+            <div class="stat"><strong id="totalAttacks">—</strong><span>Total Attacks</span></div>
+            <div class="stat"><strong id="detected">—</strong><span>Detected</span></div>
+            <div class="stat"><strong id="detectionRate">—</strong><span>Detection Rate</span></div>
+          </div>
+          <button class="btn btn-danger" id="runRedTeamBtn" onclick="runRedTeam()">
+            ▶ Run Red-Team Test
+          </button>
+        </div>
+        <div class="red-team-results" id="redTeamResults" style="display:none;">
+          <pre id="redTeamPre"></pre>
+        </div>
+      </div>
+
+      <!-- Logs table -->
+      <div class="panel" style="grid-column: 1 / -1;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+          <h2 style="margin:0;">Recent Attack Logs</h2>
+          <button class="btn btn-primary" onclick="loadDashboard()">↻ Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Prompt</th>
+                <th>Attack Type</th>
+                <th>Risk Score</th>
+                <th>Decision</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="logsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+    <div class="footer">
+      Stats auto-refresh every 30 s &nbsp;·&nbsp; Red-team runs only on manual trigger &nbsp;·&nbsp;
+      Data source: <code>GET /dashboard_data</code>
+    </div>
+  </div>
+
+  <script>
+    let attackChart;
+    let decisionChart;
+
+    function buildChart(elementId, type, labels, values, colors) {
+      const ctx = document.getElementById(elementId).getContext("2d");
+      return new Chart(ctx, {
+        type,
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            backgroundColor: colors,
+            borderColor: "rgba(255,255,255,0.12)",
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { labels: { color: "#ebf4ff" } } },
+          scales: type === "bar" ? {
+            x: { ticks: { color: "#9ab3cc" }, grid: { color: "rgba(255,255,255,0.05)" } },
+            y: { ticks: { color: "#9ab3cc" }, grid: { color: "rgba(255,255,255,0.05)" }, beginAtZero: true }
+          } : {}
+        }
+      });
+    }
+
+    function renderLogs(logs) {
+      const tbody = document.getElementById("logsTableBody");
+      tbody.innerHTML = "";
+      if (!logs.length) {
+        tbody.innerHTML = "<tr><td colspan='6' style='color:var(--muted);text-align:center;'>No logs yet.</td></tr>";
+        return;
+      }
+      logs.forEach((log) => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${log.id}</td>
+          <td>${log.prompt}</td>
+          <td>${log.attack_type}</td>
+          <td>${Number(log.risk_score).toFixed(2)}</td>
+          <td><span class="tag ${log.decision}">${log.decision}</span></td>
+          <td>${log.timestamp}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    async function loadDashboard() {
+      try {
+        const response = await fetch("/dashboard_data");
+        const data = await response.json();
+
+        const attackLabels = Object.keys(data.attacks_by_category);
+        const attackValues = Object.values(data.attacks_by_category);
+        const decisionLabels = Object.keys(data.decision_distribution);
+        const decisionValues = Object.values(data.decision_distribution);
+
+        if (attackChart)  attackChart.destroy();
+        if (decisionChart) decisionChart.destroy();
+
+        attackChart = buildChart(
+          "attackChart", "bar",
+          attackLabels.length  ? attackLabels  : ["No Data"],
+          attackValues.length  ? attackValues  : [0],
+          ["#4ea1ff", "#27c1a5", "#ffc857", "#ff6f6f"]
+        );
+        decisionChart = buildChart(
+          "decisionChart", "doughnut",
+          decisionLabels.length ? decisionLabels : ["No Data"],
+          decisionValues.length ? decisionValues : [0],
+          ["#27c1a5", "#ffc857", "#ff6f6f"]
+        );
+
+        renderLogs(data.recent_logs || []);
+      } catch (err) {
+        console.error("Dashboard refresh failed:", err);
+      }
+    }
+
+    async function runRedTeam() {
+      const btn = document.getElementById("runRedTeamBtn");
+      btn.disabled = true;
+      btn.textContent = "Running…";
+      document.getElementById("redTeamResults").style.display = "none";
+
+      try {
+        const res = await fetch("/run_red_team", { method: "POST" });
+        const data = await res.json();
+
+        document.getElementById("totalAttacks").textContent  = data["Total Attacks"] ?? "—";
+        document.getElementById("detected").textContent      = data["Detected"] ?? "—";
+        document.getElementById("detectionRate").textContent = data["Detection Rate"] != null
+          ? `${data["Detection Rate"]}%` : "—";
+
+        document.getElementById("redTeamPre").textContent =
+          JSON.stringify(data.results, null, 2);
+        document.getElementById("redTeamResults").style.display = "block";
+
+        // Refresh logs after red-team run
+        await loadDashboard();
+      } catch (err) {
+        document.getElementById("redTeamPre").textContent = `Error: ${err.message}`;
+        document.getElementById("redTeamResults").style.display = "block";
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "▶ Run Red-Team Test";
+      }
+    }
+
+    // Initial load + auto-refresh stats only (no red-team)
+    loadDashboard();
+    setInterval(loadDashboard, 30000);
+  </script>
+</body>
+</html>
